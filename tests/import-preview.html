@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Artist import test fixture</title>
+  <link rel="stylesheet" href="../ui/phone.css">
+  <link rel="stylesheet" href="../ui/aura.css">
+  <style>
+    body{display:block;margin:0;background:var(--bg)}
+    #test-screen{position:relative;height:100dvh;width:min(100%,460px);margin:auto;background:var(--bg);overflow:hidden}
+    #test-open{margin:24px}
+    .overlay,.sheet{animation:none!important}
+  </style>
+</head>
+<body>
+  <div id="test-screen"><button id="test-open" type="button">一键导入 st-chatu8 画师串</button></div>
+  <script type="module">
+    import {importChatu8Sheet} from '../ui/chatu8-import.js';
+    import {chatu8Snapshot, naiSwitcherSnapshot} from '../core/chatu8-artists.js';
+    import {installDrawSettings} from '../core/backend-draw.js';
+    import {normalizeDraw} from '../core/draw.js';
+    class Backend {
+      constructor() { this.settings = {draw: normalizeDraw({styles: [{id: 'a', name: '已有画风', artist: 'LOCAL', positive: '', negative: ''}, {id: 'b', name: 'second', artist: 'LOCAL2', positive: '', negative: ''}]}), routes: []}; this.saves = 0; this.revision = 0; }
+      assertOpen() {}
+      getState() { return structuredClone(this.settings); }
+      save(value, revision) { if (revision !== undefined && revision !== this.revision) throw Error('stale settings'); this.settings = {...structuredClone(value), draw: normalizeDraw(value.draw)}; this.saves++; this.revision++; return this.getState(); }
+    }
+    installDrawSettings(Backend);
+    const backend = new Backend(), p = text => ({fixedPrompt: text, fixedPrompt_end: 'TAIL', negativePrompt: 'NEG'});
+    const source = {yushe: {'已有画风': p('NEW'), second: p('NEW2'), '<img src=x onerror=alert(1)>': p('SAFE'), ['很长的画风名称'.repeat(10)]: p('LONG')}};
+    const canvas = document.createElement('canvas'); canvas.width = 240; canvas.height = 360;
+    const g = canvas.getContext('2d'); g.fillStyle = '#3d9873'; g.fillRect(0, 0, 240, 360); g.fillStyle = '#e45e70'; g.fillRect(30, 40, 160, 160);
+    const naiSource = {entries: {
+      a: {name: '已有画风', naiParamsSelected: true, naiParams: {novelai_steps: '23', nai3Scale: '6'}, thumb: canvas.toDataURL('image/png')},
+      b: {name: 'second', naiParamGroup: 'group'}
+    }, paramGroups: {group: {params: {novelai_steps: '25'}}}};
+    const files = new Map();
+    backend.syncFiles = {async writePath(path, blob) { files.set('/' + path, blob); return '/' + path; }, async removePath(path) { files.delete(path); }};
+    const ctx = {
+      api: {getState: () => backend.getState(), chatu8ArtistSnapshot: () => chatu8Snapshot(source), naiSwitcherSnapshot: () => naiSwitcherSnapshot(naiSource), importChatu8Artists: (...args) => backend.importChatu8Artists(...args)},
+      notify: message => { window.testNotice = message; },
+      dialog(title, html) {
+        const overlay = document.createElement('div'); overlay.className = 'overlay';
+        overlay.innerHTML = '<section class="sheet" role="dialog" aria-modal="true"><header class="sheet-header"><h2></h2></header><div class="sheet-body"></div></section>';
+        overlay.querySelector('h2').textContent = title;
+        const body = overlay.querySelector('.sheet-body'); body.innerHTML = html;
+        document.querySelector('#test-screen').append(overlay);
+        const dialog = {body, live: true, close() { this.live = false; overlay.remove(); }};
+        return dialog;
+      }
+    };
+    window.testFixture = {backend, source, naiSource, files, open: () => importChatu8Sheet(ctx)};
+    document.querySelector('#test-open').onclick = () => window.testFixture.open();
+    window.testReady = true;
+  </script>
+</body>
+</html>

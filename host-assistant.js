@@ -5,7 +5,7 @@ import {activeText, customRequest, streamText, responseMetadata, failure, replyT
 import {modelRules} from './core/state.js';
 import {tavernAssistantPresets, buildTavernAssistantMessages} from './assistant-presets.js';
 import {createAssistantContext} from './assistant-context.js';
-import {assistantBlocks, assistantDrawGuide, pictureInputs} from './core/draw.js';
+import {assistantBlocks, assistantDrawGuide, pictureInputs, stylePrompt, styleNegative} from './core/draw.js';
 import {createAssistantMemoryHost, assistantMemoryThread} from './host-assistant-memory.js';
 
 // 智能界面: small native pieces of UI the model may put in a reply (like ChatGPT's visual answers), drawn by the phone
@@ -131,14 +131,14 @@ export function assistantPicture(text, style = {}) {
   if (typeof value?.prompt !== 'string' || !value.prompt.trim() || value.prompt.length > 5000) throw Error('助手的绘图提示词为空或过长，请重试');
   const before = typeof value.before === 'string' ? value.before.trim() : '我按刚才的要求画了一张：', after = typeof value.after === 'string' ? value.after.trim() : '';
   if (before.length + after.length > 30000 || [before, after].some(t => t.includes(ASSISTANT_IMAGE_SLOT))) throw Error('图片回复内容格式无效，请重试');
-  return {prompt: [style.artist, style.positive, value.prompt.trim()].filter(Boolean).join(', ').slice(0, 6000), imageReply: [before, ASSISTANT_IMAGE_SLOT, after].filter(Boolean).join('\n\n')};
+  return {prompt: stylePrompt(style, value.prompt.trim()).slice(0, 6000), imageReply: [before, ASSISTANT_IMAGE_SLOT, after].filter(Boolean).join('\n\n')};
 }
 /** What goes to the drawing engine: an 出图块 exactly as in the story (画风, each person's saved look, 站位, size); an
  *  older plain prompt as it was. */
 export function assistantInputs(settings, prompt, style = {}) {
   const [tag] = /<img\b/i.test(prompt) ? assistantBlocks(prompt) : [];
   if (tag) { const {names, ...input} = pictureInputs(settings, tag, ''); return {...input, negative: [input.negative, tag.negative].filter(Boolean).join(', ')}; }
-  return {prompt, negative: style.negative || ''};
+  return {prompt, negative: styleNegative(style)};
 }
 
 export function createAssistantHost({context, settings, backend, presets = tavernAssistantPresets, buildContext, request = requestAssistantText, loadCompletion = loadCompletionModule, regex = null}) {

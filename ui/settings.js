@@ -8,6 +8,7 @@ import {wallpapers, skins, customWallpaper} from './wallpapers.js';
 import {glyph} from './icons.js';
 import {cleanTheme, deriveTheme, wheelHue, THEME_PRESETS} from '../core/theme-colors.js';
 import {themeEditor} from './theme-editor.js';
+import {importChatu8Sheet} from './chatu8-import.js';
 
 const MARKS = {ok: '✓', warn: '!', error: '✕', info: '·'};
 // the 大游戏 whose saves a backup can hold, by the game's id
@@ -363,6 +364,7 @@ export function settingsApp(ctx) {
           <div class="setting-row"><span class="row-text"><strong>手机分开${help('按角色卡：每张角色卡（群聊是每个群）一部手机：聊天记录、朋友圈、论坛、查手机各管各的，换卡就换手机；联系人只有这张卡的角色、在这张卡剧情里说过话的角色，和在这张卡里手动加的联系人。「我」跟着酒馆给这张卡锁定的人设走。打开之前就有的聊天和动态没有归属，每张卡都看得到。\n\n按聊天：每个酒馆聊天一部手机。同一张卡开新聊天（重开一个轮回）就是一部新手机：聊天记录、拉黑、朋友圈、论坛、查手机和剧情里出场过的人都从头来，正文也不会再提上一个聊天里的拉黑；回到旧聊天，旧的都还在。以前的内容归第一个打开的聊天，所以先进你想留着它们的那个聊天，再选「按聊天」。\n\n改回不分开，所有东西又会一起显示。')}</strong><small>${space.key ? '现在是' + esc(space.name || '这张角色卡') + (s.chat.partition === 'card' ? ' 的手机' : s.chat.partition === 'chat' ? ' 这个聊天的手机' : '') : '没有打开角色卡'}</small></span><span class="select partition-select">${`<select data-field="partition" aria-label="手机分开">${[['none', '不分开'], ['card', '按角色卡'], ['chat', '按聊天']].map(([k, l]) => `<option value="${k}"${s.chat.partition === k ? ' selected' : ''}>${l}</option>`).join('')}</select>`}</span></div></div>`
       + groupTitle('资料')
       + `<div class="group">${syncRows()}
+          <button class="list-row" data-action="import-chatu8"><span><strong>一键导入 st-chatu8 画师串</strong></span>${icon('import')}</button>
           <button class="list-row" data-action="backup"><span><strong>备份到文件</strong><small>换设备或误删时能找回</small></span>${icon('next')}</button>
           <label class="list-row file-button"><span><strong>从文件恢复</strong><small>选一个 ST-iPhonie 备份文件</small></span>${icon('next')}<input type="file" data-backup-file accept=".json,application/json" aria-label="选择备份文件"></label>
           <button class="list-row" data-action="storage"><span><strong>存储空间</strong><small>${used ? '用了 ' + used + ' · ' : ''}语音缓存、清理</small></span>${icon('next')}</button></div>`
@@ -497,6 +499,7 @@ export function settingsApp(ctx) {
       case 'cancel-appearance': appearance = null; await render(); break;
       case 'save-appearance': await v.busy(el, async () => { const {theme, themeHue, ...look} = appearance; await api.savePhone(look); appearance = null; await render(); ctx.notify('外观已应用'); }); break;
       case 'storage': storage = true; await render(); v.root.scrollTop = 0; break;
+      case 'import-chatu8': importChatu8Sheet(ctx, () => render()); break;
       case 'self-check': case 'run-check': await runCheck(); break;
       case 'backup': backup = {parts: new Set(Object.keys(api.backupParts()).filter(part => part !== 'keys')), password: '', again: ''}; await render(); break;
       case 'sync-clear': if (await ctx.confirm('删除酒馆里的那份？', '酒馆里存的聊天、相册、音乐、画画的作品这些都会删掉，别的设备再同步时就读不到了。这台设备上的内容不受影响；同步开着的话，之后会重新存一份。')) await clearTavernCopy(); break;

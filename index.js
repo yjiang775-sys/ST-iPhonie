@@ -13,6 +13,7 @@ import { FloatingPlayer } from './core/floating.js';
 import { renderPictures, drawPromptPlan, tavernPicture } from './core/draw.js';
 import { outgoingChat, storyReply } from './core/outgoing.js';
 import { createPictureHost } from './host-pictures.js';
+import { chatu8Snapshot, naiSwitcherSnapshot } from './core/chatu8-artists.js';
 import {publicApi, registerDrawCommand} from './host-public.js';
 import { createChatHost } from './host-chat.js';
 import { createMomentsHost } from './host-moments.js';
@@ -393,6 +394,8 @@ function connect(source){
  return Object.freeze({...api,
   save:(next,revision)=>{check();return api.save({...next,floating:settings.floating},revision);},
   close:()=>{check();panel?.close();},
+  chatu8ArtistSnapshot:()=>{check();return chatu8Snapshot(context()?.extensionSettings?.['st-chatu8']);},
+  naiSwitcherSnapshot:()=>{check();return naiSwitcherSnapshot(context()?.extensionSettings?.nai_preset_switcher);},
   latest:()=>{check();const snap=latestMessage();return {id:snap?.id??-1,lines:snap?parsed(snap.raw).lines:[]};},
   currentDialogue:()=>{check();return currentDialogue();},
   listDialogueReplies:()=>{check();return listDialogueReplies();},

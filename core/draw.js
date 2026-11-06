@@ -22,6 +22,7 @@ import {normalizeGrid} from './nai-grid.js';
 import {tidyGroups, layerTree} from './layers.js';
 import {DRAW_ENGINES, DRAW_ENGINE_NAMES, defaultGpt, normalizeGpt, defaultComfy, normalizeComfy} from './image-engines.js';
 import {escapeHTML, isPlaceholderRole} from './protocol.js';
+import {stripArtistAnnotations} from './chatu8-artists.js';
 
 const BLOCK = ['<img>', '画幅：竖 / 横 / 方', '场景：英文 tag', '角色：名字｜这一刻的 tag｜不要出现的 tag｜站位（画面里每个人单独一行，每一行都以「角色：」开头）', '新外貌：名字｜固定外貌 tag（只在名单外的新角色第一次出现时写）', '</img>'];
 export const PIC_TAG_FORMAT = BLOCK.join('\n');
@@ -374,13 +375,16 @@ export const normalizeRoleRef = ref => COVER_PATH.test(ref?.thumb) && COVER_PATH
 /** The 画风 a picture was drawn with, by the 画师串 in its words (the longest that fits); null when none does. */
 export function styleOfWords(d, words) {
   const text = String(words || '');
-  return d.styles.filter(s => s.artist.trim() && text.includes(s.artist.trim())).sort((a, b) => b.artist.trim().length - a.artist.trim().length)[0] || null;
+  return d.styles.filter(s => styleWord(s, s.artist) && text.includes(styleWord(s, s.artist))).sort((a, b) => styleWord(b, b.artist).length - styleWord(a, a.artist).length)[0] || null;
 }
 /** 画一张 for a 画风's 效果图: inputs for generateImage, with that 画风's own settings whichever one is in use. */
 export function styleSample(d, style, words) {
   const params = {...d.params, ...(style.params || {}), seed: -1};
-  return {prompt: [style.artist, style.positive, words].map(x => String(x || '').trim()).filter(Boolean).join(', '), negative: String(style.negative || '').trim(), characters: [], params: d.guard ? guardParams(params) : params};
+  return {prompt: stylePrompt(style, words), negative: styleNegative(style), characters: [], params: d.guard ? guardParams(params) : params};
 }
+const styleWord = (style, value) => (style.stripAnnotations ? stripArtistAnnotations(value) : String(value ?? '')).trim();
+export const stylePrompt = (style, ...words) => [styleWord(style, style.artist), styleWord(style, style.positive), ...words.map(x => String(x ?? '').trim()), styleWord(style, style.postfix)].filter(Boolean).join(', ');
+export const styleNegative = style => styleWord(style, style.negative);
 export const chunkTree = d => layerTree(d.chunks || [], d.chunkGroups);
 
 /** Connection presets contain no secrets. Legacy single connections become the default preset. */
@@ -450,7 +454,7 @@ export function normalizeDraw(value) {
   d.positionGrid = normalizePositionGrid(d.positionGrid);
   d.maskLook = normalizeMaskLook(d.maskLook);
   d.params = normalizeDrawParams(d.params);
-  d.styles = (Array.isArray(d.styles) && d.styles.length ? d.styles : base.styles).map(s => ({id: String(s.id || crypto.randomUUID()), name: text(s.name, 60) || '画风', artist: text(s.artist, 4000), positive: text(s.positive, 4000), negative: text(s.negative, 4000),
+  d.styles = (Array.isArray(d.styles) && d.styles.length ? d.styles : base.styles).map(s => ({id: String(s.id || crypto.randomUUID()), name: text(s.name) || '画风', artist: text(s.artist), positive: text(s.positive), postfix: text(s.postfix), negative: text(s.negative), ...(s.stripAnnotations === true ? {stripAnnotations: true} : {}),
     ...(s.params && typeof s.params === 'object' ? {params: styleParams({...d.params, ...s.params})} : {}), ...(s.group ? {group: String(s.group)} : {}), ...(COVER_PATH.test(s.cover?.thumb) && COVER_PATH.test(s.cover?.full) ? {cover: {thumb: tavernPicture(String(s.cover.thumb)), full: tavernPicture(String(s.cover.full))}} : {})}));
   tidyStyleGroups(d);
   d.activeStyle = d.styles.some(s => s.id === d.activeStyle) ? d.activeStyle : d.styles[0].id;
@@ -572,7 +576,7 @@ export function budgetNumbers(settings, only = null) {
   const d = settings.draw, b = d?.engine === 'nai' || !d?.engine ? tokenBudget(d?.params?.model) : null;
   if (!b) return null;
   const count = counterNow(b.kind) || estimateTokens, st = activeStyle(d);
-  const head = countField(count, [st.artist, st.positive].map(x => (x || '').trim()).filter(Boolean).join(', '));
+  const head = countField(count, stylePrompt(st));
   const looks = drawable(settings).filter(r => r.appearance?.trim() && (!only || only.includes(r.name))).map(r => `${r.name}约 ${countField(count, r.appearance)}`);
   const left = Math.max(0, b.limit - head);
   return {name: NAI_MODEL_NAMES[d.params.model] || d.params.model, limit: b.limit, head, looks, left, tags: Math.floor(left / tagCost(count))};
@@ -1078,8 +1082,8 @@ const fixedNegative = (role, others = false) => { const tags = String(role?.nega
  */
 export function lookTest(settings, {appearance = '', negative = '', name = '', ref = null} = {}) {
   const draw = settings.draw, style = activeStyle(draw) || {}, gender = genderOf(appearance);
-  const words = [style.artist, style.positive, ...(gender ? [`1${gender}, solo`] : []), 'upper body, looking at viewer, simple background'].map(x => String(x || '').trim()).filter(Boolean);
-  return {prompt: words.join(', '), negative: String(style.negative || '').trim(), characters: [{prompt: soloTags(String(appearance).trim()), negative: String(negative).trim(), position: -1}], params: {...(draw.guard ? guardParams(draw.params) : draw.params), seed: -1},
+  const words = [...(gender ? [`1${gender}, solo`] : []), 'upper body, looking at viewer, simple background'];
+  return {prompt: stylePrompt(style, ...words), negative: styleNegative(style), characters: [{prompt: soloTags(String(appearance).trim()), negative: String(negative).trim(), position: -1}], params: {...(draw.guard ? guardParams(draw.params) : draw.params), seed: -1},
     ...(ref?.full ? {roleRefs: [{name: String(name || '').trim() || '角色', path: ref.full}]} : {})};
 }
 /** Character prompts count nobody: 1girl/1boy/1other in a fixed appearance become girl/boy/other. */
@@ -1111,10 +1115,9 @@ export function pictureInputs(settings, tag, text = '') {
   const draw = settings.draw, style = activeStyle(draw), spec = tag.spec;
   const sized = {...draw.params, ...sizeFor(draw.params, spec?.size)};
   const params = draw.guard ? guardParams(sized) : sized;
-  const head = [style.artist, style.positive].map(x => (x || '').trim()).filter(Boolean);
   if (!spec) {
     const roles = pictureRoles(settings, tag, text);
-    return {prompt: [...head, tag.prompt].join(', '), negative: style.negative.trim(),
+    return {prompt: stylePrompt(style, tag.prompt), negative: styleNegative(style),
       characters: roles.map(r => ({prompt: r.appearance.trim(), negative: fixedNegative(r, roles.length > 1), position: -1})), names: roles.map(r => r.name), params, ...withRefs(roles)};
   }
   const roles = drawable(settings);
@@ -1122,7 +1125,7 @@ export function pictureInputs(settings, tag, text = '') {
   // names before it, so their looks are not lost.
   if (!spec.cast.length && peopleCount(spec.tags)) {
     const seen = pictureRoles(settings, {...tag, characters: [], prompt: spec.tags}, text);
-    if (seen.length) return {prompt: [...head, sceneTags(spec.tags, seen.length), spec.nl].filter(Boolean).join(', '), negative: style.negative.trim(),
+    if (seen.length) return {prompt: stylePrompt(style, sceneTags(spec.tags, seen.length), spec.nl), negative: styleNegative(style),
       characters: seen.map(r => ({prompt: soloTags(r.appearance.trim()), negative: fixedNegative(r, seen.length > 1), position: -1})), names: seen.map(r => r.name), params, ...withRefs(seen)};
   }
   const many = spec.cast.length > 1, taken = new Set();
@@ -1146,6 +1149,6 @@ export function pictureInputs(settings, tag, text = '') {
   });
   // A role with a 参考图 and no 外貌 yet is still found for it.
   const everyone = settings.routes.filter(r => !isPlaceholderRole(r.name));
-  return {prompt: [...head, sceneTags(spec.tags, spec.cast.length), spec.nl].filter(Boolean).join(', '), negative: style.negative.trim(), characters, names: spec.cast.map(c => c.name), params,
+  return {prompt: stylePrompt(style, sceneTags(spec.tags, spec.cast.length), spec.nl), negative: styleNegative(style), characters, names: spec.cast.map(c => c.name), params,
     ...withRefs(spec.cast.map(c => roleNamed(roles, c.name) || roleNamed(everyone, c.name)))};
 }

@@ -12,6 +12,7 @@ import { normalizeGrid } from './nai-grid.js';
 import { arrangeRows } from './layers.js';
 import { makeThumb, gptReference } from './thumbnail.js';
 import { proxyAddress } from './proxy-url.js';
+import { artistImportRows } from './chatu8-artists.js';
 
 const clone = value => structuredClone(value);
 // 效果图: a small picture for the list and a bigger one to look at, by their shorter sides; files of their own in the tavern.
@@ -33,6 +34,22 @@ async function base64Of(blob) {
     let text = '';
     for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
     return btoa(text);
+}
+async function writeStyleCover(backend, blob) {
+    if (!backend.syncFiles?.writePath) throw Error('需要酒馆文件存储才能导入封面');
+    let small, big;
+    try { [small, big] = await Promise.all([makeThumb(blob, COVER_SIZES.s), makeThumb(blob, COVER_SIZES.l)]); }
+    catch { throw Error('这张图读不出来，换一张试试'); }
+    const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6), file = (kind, made) => `user/images/ST-iPhonie/style-${stamp}-${kind}.${made.blob.type === 'image/webp' ? 'webp' : 'jpg'}`;
+    const paths = [];
+    try {
+        const thumb = await backend.syncFiles.writePath(file('s', small), small.blob); paths.push(thumb);
+        const full = await backend.syncFiles.writePath(file('l', big), big.blob); paths.push(full);
+        return {thumb, full};
+    } catch (error) {
+        for (const path of paths) try { await backend.syncFiles.removePath?.(path); } catch {}
+        throw error;
+    }
 }
 const BLANK_PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 /** The scheme in use, ready to change: the built-in default stays as it is, so the first change makes a copy and switches to it. */
@@ -286,8 +303,9 @@ class DrawSettings {
     }
     saveStyle(value) {
         if (!value || typeof value !== 'object' || !String(value.name || '').trim()) throw Error('请填写画风名称');
-        const next = this.getState(), style = { id: value.id || crypto.randomUUID(), name: String(value.name).trim(), artist: String(value.artist || ''), positive: String(value.positive || ''), negative: String(value.negative || '') };
+        const next = this.getState(), style = { id: value.id || crypto.randomUUID(), name: String(value.name).trim(), artist: String(value.artist || ''), positive: String(value.positive || ''), postfix: String(value.postfix || ''), negative: String(value.negative || '') };
         const index = next.draw.styles.findIndex(s => s.id === style.id), was = next.draw.styles[index];
+        if (value.stripAnnotations === true || was?.stripAnnotations === true) style.stripAnnotations = true;
         // Its parameters: the ones given (a copy keeps the original's), else the ones it had.
         const params = value.params && typeof value.params === 'object' ? value.params : was?.params;
         if (params) style.params = styleParams({ ...next.draw.params, ...params });
@@ -300,6 +318,60 @@ class DrawSettings {
         if (index >= 0) next.draw.styles[index] = style; else if (after >= 0) next.draw.styles.splice(after + 1, 0, style); else next.draw.styles.push(style);
         this.save(next);
         return clone(this.settings.draw.styles.find(s => s.id === style.id));
+    }
+    async importChatu8Artists(snapshot, overwriteIds = [], naiSnapshot) {
+        this.assertOpen();
+        const revision = this.revision;
+        const next = this.getState(), rows = artistImportRows(snapshot, next.draw.styles, naiSnapshot), selected = new Set(overwriteIds);
+        const counts = {added: 0, overwritten: 0, skipped: 0};
+        const operations = [];
+        for (const row of rows) {
+            const {targets} = row;
+            if (!targets.length) operations.push({row, id: crypto.randomUUID(), add: true});
+            else {
+                const chosen = targets.filter(id => selected.has(id));
+                for (const id of chosen) operations.push({row, id, add: false});
+                counts.overwritten += chosen.length;
+                if (!chosen.length) counts.skipped++;
+            }
+        }
+        const importedCovers = new Map(), oldCovers = [];
+        try {
+            for (const {row} of operations) if (row.coverData && !importedCovers.has(row.name)) {
+                const blob = await fetch(row.coverData).then(response => response.blob());
+                importedCovers.set(row.name, await writeStyleCover(this, blob));
+            }
+        } catch (error) {
+            sweepCovers(this, [...importedCovers.values()]);
+            throw error;
+        }
+        for (const {row, id, add} of operations) {
+            const {name, preset} = row;
+            const words = {artist: preset.fixedPrompt ?? '', positive: '', postfix: preset.fixedPrompt_end ?? '', negative: preset.negativePrompt ?? '', stripAnnotations: true};
+            if (add) {
+                next.draw.styles.push({id, name, ...words});
+                counts.added++;
+            } else {
+                const style = next.draw.styles.find(s => s.id === id);
+                if (style.cover && importedCovers.has(name)) oldCovers.push(style.cover);
+                Object.assign(style, words);
+            }
+            const style = next.draw.styles.find(s => s.id === id);
+            if (row.params) style.params = {...style.params, ...row.params};
+            if (importedCovers.has(name)) style.cover = clone(importedCovers.get(name));
+        }
+        if (counts.added || counts.overwritten) {
+            next.draw.chatu8Snapshot = clone(snapshot);
+            if (naiSnapshot) {
+                next.draw.naiSwitcherSnapshot = clone(naiSnapshot);
+                // The cover files above are independent; avoid keeping a second copy of every image in settings.
+                for (const record of Object.values(next.draw.naiSwitcherSnapshot.entries || {})) if (record && typeof record === 'object') delete record.thumb;
+            }
+            try { this.save(next, revision); }
+            catch (error) { sweepCovers(this, [...importedCovers.values()]); throw error; }
+            sweepCovers(this, oldCovers);
+        }
+        return counts;
     }
     deleteStyle(id) { return this.deleteStyles([id]); }
     /** Several 画风 at once (a group's, the ones picked): one save; at least one has to stay. */
@@ -321,10 +393,7 @@ class DrawSettings {
         if (!this.syncFiles?.writePath) throw Error('要在酒馆里打开小手机，才能存效果图');
         if (!this.settings.draw.styles.some(s => s.id === id)) throw Error('这个画风已经不在了');
         if (!blob) throw Error('这张图已经不在了');
-        let small, big;
-        try { [small, big] = [await makeThumb(blob, COVER_SIZES.s), await makeThumb(blob, COVER_SIZES.l)]; } catch { throw Error('这张图读不出来，换一张试试'); }
-        const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6), file = (kind, made) => `user/images/ST-iPhonie/style-${stamp}-${kind}.${made.blob.type === 'image/webp' ? 'webp' : 'jpg'}`;
-        const cover = { thumb: await this.syncFiles.writePath(file('s', small), small.blob), full: await this.syncFiles.writePath(file('l', big), big.blob) };
+        const cover = await writeStyleCover(this, blob);
         const next = this.getState(), style = next.draw.styles.find(s => s.id === id);
         // Deleted while the files went up.
         if (!style) { sweepCovers(this, [cover]); throw Error('这个画风已经不在了'); }

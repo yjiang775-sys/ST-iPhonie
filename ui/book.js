@@ -205,7 +205,7 @@ export function bookApp(ctx) {
     const state = api.getState();
     if (book.art !== 'book') return state;
     const s = structuredClone(state), style = activeStyle(s.draw), t = themeOf(book.theme);
-    if (style) { style.artist = ''; style.positive = t.art; }
+    if (style) { style.artist = ''; style.positive = t.art; style.postfix = ''; delete style.stripAnnotations; }
     return s;
   }
   const safeTitle = () => book.title.replace(/[\\/:*?"<>|]/g, '').slice(0, 30) || '绘本';

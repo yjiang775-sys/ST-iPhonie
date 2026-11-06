@@ -1,4 +1,7 @@
 /* ST-iPhonie phone UI - "晴空贴纸" style. Colour tokens first, then shell, shared components, apps. */
+.chatu8-import .setting-row>span{flex:1;min-width:0;overflow-wrap:anywhere}
+.chatu8-import .setting-row>input{flex-shrink:0}
+.chatu8-import .actions>*{min-width:0;overflow-wrap:anywhere}
 
 /* ---------- Tokens ---------- */
 :root{

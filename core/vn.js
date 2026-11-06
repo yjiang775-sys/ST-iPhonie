@@ -4,7 +4,7 @@
 import {skippedRanges, narrationPieces, NARRATION_SKIP, NARRATION_BODY, cleanSkip} from './narration.js';
 import {normalizeModels, normalizeMoveFiles} from './model-files.js';
 import {visualEmotion, visualEffects, matchesVisualWord, visualWordEmotion, visualWordHits, doneBy} from './visual-emotion.js';
-import {activeStyle, sizeFor, tavernPicture} from './draw.js';
+import {activeStyle, sizeFor, tavernPicture, stylePrompt, styleNegative} from './draw.js';
 import {isV5} from './novelai.js';
 
 /** What a 立绘 asks of the picture, after the 画风 and before the character's own looks. Editable in the app. The
@@ -486,14 +486,13 @@ export function spriteRequest(settings, name, {appearance, rule, extra = '', see
   const draw = settings.draw, style = activeStyle(draw) || {}, vn = normalizeVn(settings.vn);
   const route = (settings.routes || []).find(r => r.name === name);
   const looks = String(appearance ?? route?.appearance ?? '').trim();
-  const head = [style.artist, style.positive].map(x => String(x || '').trim()).filter(Boolean);
   const want = String(rule ?? vn.rule).trim(), more = String(extra || '').trim();
   // NovelAI V5 draws a transparent background itself; other engines get a flat key colour to cut out afterwards.
   const clear = (draw.engine === 'nai' || !draw.engine) && isV5(draw.params?.model);
   const backdrop = /background/i.test(want + ',' + more) ? '' : clear ? '2::transparent background::' : `simple background, ${keyColorFor(looks)} background`;
   return {
-    prompt: [...head, want, more, backdrop, looks ? '' : name].filter(Boolean).join(', '),
-    negative: [String(style.negative || '').trim(), SPRITE_NEGATIVE].filter(Boolean).join(', '),
+    prompt: stylePrompt(style, want, more, backdrop, looks ? '' : name),
+    negative: [styleNegative(style), SPRITE_NEGATIVE].filter(Boolean).join(', '),
     characters: looks ? [{prompt: looks, negative: String(route?.negative || '').trim(), position: -1}] : [],
     params: {...draw.params, ...sizeFor(draw.params, '竖'), seed: Number.isInteger(seed) && seed >= 0 ? seed : -1, transparent: clear && !!backdrop},
   };

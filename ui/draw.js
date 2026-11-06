@@ -11,7 +11,7 @@ import {tokenBudget, loadCounter, countPicture, countField, tagCost} from '../co
 import {refPanel} from './draw-refs.js';
 import {pictureData, readNovelAI, fitBase, scaledPicture, enhanceSizes, composeFocused, composeGrid, canCopyPicture, copyPicture} from './draw-images.js';
 import {DIRECTOR_TOOLS, DIRECTOR_WORDS, EMOTIONS, upscaleBy, UPSCALE_MAX, naiFeatures, samplersFor, schedulesFor, qualityPresets, ucPresets, finalWords, NAI_SAMPLER_NAMES, maxEnhanceSize, usageImages, usageRefillPerDay} from '../core/novelai.js';
-import {LOCKS, unlockedParams, POSITION_GRIDS} from '../core/draw.js';
+import {LOCKS, unlockedParams, POSITION_GRIDS, stylePrompt, styleNegative} from '../core/draw.js';
 import {embeddedVibeFile} from '../core/vibes.js';
 import {randomPicture} from '../core/nai-random.js';
 import {wordHelper, chunkSheet, markedBox} from './draw-words.js';
@@ -253,9 +253,9 @@ export function drawApp(ctx) {
     try { count = await loadCounter(budget.kind); } catch { for (const b of boxes) { b.hidden = false; b.textContent = '读不到分词表，暂时数不了 token'; } return; }
     if (ticket !== meterTicket || v.disposed) return;
     const st = style(), join = list => list.map(x => (x || '').trim()).filter(Boolean).join(', ');
-    const sent = finalWords({prompt: join([st.artist, st.positive, randomText || prompt]), negative: join([st.negative, negative]), characters: randomChars || characters, params: state().params, chunks: state().chunks});
+    const sent = finalWords({prompt: stylePrompt(st, randomText || prompt), negative: join([styleNegative(st), negative]), characters: randomChars || characters, params: state().params, chunks: state().chunks});
     const used = countPicture(count, {prompt: sent.prompt, negative: sent.negative, characters: sent.characters.map(c => ({prompt: c.prompt}))}, budget);
-    const head = countField(count, join([st.artist, st.positive])), tag = tagCost(count);
+    const head = countField(count, stylePrompt(st)), tag = tagCost(count);
     for (const box of boxes) {
       const negativeSide = box.dataset.tokenMeter === 'negative', n = negativeSide ? used.negative : used.used, ratio = n / budget.limit, left = budget.limit - n;
       const level = ratio > 1 ? 'over' : ratio >= .85 ? 'full' : 'room';
@@ -625,8 +625,8 @@ export function drawApp(ctx) {
     // 随机提示词 only exists for NovelAI; it is drawn in place of what is written.
     const words = eng() === 'nai' && randomText || prompt, people = eng() === 'nai' && randomChars || characters;
     await drawMany({
-      prompt: joinWords([s.artist, s.positive, words]),
-      negative: joinWords([s.negative, negative]),
+      prompt: stylePrompt(s, words),
+      negative: joinWords([styleNegative(s), negative]),
       characters: people.filter(c => c.prompt.trim()).map(({name, ...c}) => ({...c})),
       params: eng() === 'nai' ? {...state().params, seed} : {seed}, name: engineName().replace(/\s+/g, ''), label: '绘图 App · ' + (words.trim().slice(0, 24) || s.name),
       source: {prompt: words, negative, characters: structuredClone(people), params: {...state().params}, styleId: styleId()},
@@ -649,7 +649,7 @@ export function drawApp(ctx) {
     busy = true;
     render();
     const jobs = asked.map((c, i) => {
-      const request = {prompt: joinWords([s.artist, s.positive, c.words]), negative: joinWords([s.negative, c.unwanted]), characters: people.filter(x => x.prompt.trim()).map(({name, ...x}) => ({...x}))};
+      const request = {prompt: stylePrompt(s, c.words), negative: joinWords([styleNegative(s), c.unwanted]), characters: people.filter(x => x.prompt.trim()).map(({name, ...x}) => ({...x}))};
       return api.generateImage({...request, params: c.params, allowPaid: true, name: 'NovelAI', label: `网格 · ${i + 1}/${asked.length}`, ...(extra.base ? {base: extra.base} : {}), ...(extra.refs.length ? {refs: extra.refs} : {})})
         .then(made => { const {seed: cellSeed, uncondScale, ...own} = c.overrides.params; return keepPicture(made, {focus: extra.focus, request, source: {prompt: c.words, negative: c.unwanted, characters: structuredClone(people), params: {...now, ...own}}}); });
     });
@@ -676,7 +676,7 @@ export function drawApp(ctx) {
   function requestOf(result) {
     if (result?.request) return result.request;
     const s = style();
-    return {prompt: [s.artist, s.positive, prompt].map(x => (x || '').trim()).filter(Boolean).join(', '), negative: [s.negative, negative].map(x => (x || '').trim()).filter(Boolean).join(', '),
+    return {prompt: stylePrompt(s, prompt), negative: [styleNegative(s), negative].map(x => (x || '').trim()).filter(Boolean).join(', '),
       characters: characters.filter(c => c.prompt.trim()).map(({name, ...c}) => ({...c}))};
   }
   /** 变体: the shown picture drawn again from itself, as much changed as picked, n times. */

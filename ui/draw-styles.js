@@ -15,6 +15,7 @@ import {layerSort} from './layer-sort.js';
 import {styleTree, styleOfWords, styleSample} from '../core/draw.js';
 import {openImageViewer} from '../image-viewer.js';
 import {pickPicture} from './draw-images.js';
+import {importChatu8Sheet} from './chatu8-import.js';
 
 /** One line for a 画风's parameters: 「V4.5 Full · 28 步 · CFG 5 · k_euler_ancestral」. */
 export const paramLine = (p, names = {}) => [names[p.model] || p.model, `${p.steps} 步`, `CFG ${p.scale}`, p.sampler].join(' · ');
@@ -44,8 +45,12 @@ export function styleSheets({ctx, state, styleId, style, render, shownPicture = 
 
   function pickStyle() {
     const all = () => state().styles;
-    const d = ctx.dialog('画风', `<div class="style-picker"><div class="picker-search" hidden><input type="search" data-style-search aria-label="搜索画风、画师串" placeholder="搜索画风、画师串…" autocomplete="off"></div><div class="style-list" data-style-list></div></div>`, {add: '新建画风'});
+    const d = ctx.dialog('画风', `<div class="actions">${btn('import-chatu8', icon('import') + '导入 st-chatu8', 'secondary')}</div><div class="style-picker"><div class="picker-search" hidden><input type="search" data-style-search aria-label="搜索画风、画师串" placeholder="搜索画风、画师串…" autocomplete="off"></div><div class="style-list" data-style-list></div></div>`, {add: '新建画风'});
     const list = d.body.querySelector('[data-style-list]'), search = d.body.querySelector('[data-style-search]');
+    d.body.querySelector('[data-action=import-chatu8]').addEventListener('click', () => {
+      try { importChatu8Sheet(ctx, () => { render(); pickStyle(); }); }
+      catch (error) { ctx.notify(error.message, {error: true}); }
+    });
     let query = '';
     const styleActions = () => [{key: 'edit', label: '改', icon: 'edit'}, {key: 'copy', label: '复制', icon: 'copy'}, ...(all().length > 1 ? [{key: 'delete', label: '删除', icon: 'trash', danger: true}] : [])];
     const groupActions = [{key: 'rename', label: '改名', icon: 'edit'}, {key: 'ungroup', label: '解散', icon: 'layers'}, {key: 'delete', label: '删除', icon: 'trash', danger: true}];
@@ -97,7 +102,7 @@ export function styleSheets({ctx, state, styleId, style, render, shownPicture = 
           if (key === 'edit') { swipe.dispose(); d.close(); editStyle(target); }
           else if (key === 'copy') {
             const before = places();
-            api.saveStyle({name: (target.name + ' 副本').slice(0, 40), artist: target.artist, positive: target.positive, negative: target.negative, params: target.params, cover: target.cover, after: target.id});
+            api.saveStyle({name: (target.name + ' 副本').slice(0, 40), artist: target.artist, positive: target.positive, postfix: target.postfix, negative: target.negative, stripAnnotations: target.stripAnnotations, params: target.params, cover: target.cover, after: target.id});
             flip(paint, before);
             ctx.notify('复制好了');
           } else if (key === 'delete' && await ctx.confirm(`删除画风「${target.name}」？`, '其他画风保留。')) { api.deleteStyle(id); render(); again(); }
@@ -124,7 +129,7 @@ export function styleSheets({ctx, state, styleId, style, render, shownPicture = 
     d.overlay.addEventListener('click', e => {
       if (!e.target.closest('[data-sheet-add]')) return;
       try {
-        const now = style(), created = api.saveStyle({name: '新画风 ' + (all().length + 1), artist: '', positive: now.positive, negative: now.negative});
+        const now = style(), created = api.saveStyle({name: '新画风 ' + (all().length + 1), artist: '', positive: now.positive, postfix: now.postfix, negative: now.negative, stripAnnotations: now.stripAnnotations});
         api.saveDraw({activeStyle: created.id});
         swipe.dispose(); d.close(); render(); editStyle(created);
       } catch (error) { ctx.notify(error.message, {error: true}); }
@@ -191,9 +196,10 @@ export function styleSheets({ctx, state, styleId, style, render, shownPicture = 
   /** A style (the one in use unless another is given), in a sheet: saved with its button, left as it was when the sheet is closed. */
   function editStyle(which = style()) {
     const s = {...which};
-    const d = ctx.dialog('画风', `<div class="style-edit-cover" data-edit-cover></div>${field('名字', input('name', s.name, 'text', 'maxlength="40"'))}
+    const d = ctx.dialog('画风', `<div class="style-edit-cover" data-edit-cover></div>${field('名字', input('name', s.name))}
       ${field('画师串', textArea('artist', s.artist, 'class="code" rows="3" placeholder="例如 artist:wlop, artist:ciloranko"'), '正文出图和这里单独生图都会带上画风。每个引擎记住自己用的画风；GPT 不读画师串和固定负面。')}
       ${field('固定正面', textArea('positive', s.positive, 'class="code" rows="3"'))}
+      ${field('后置正面', textArea('postfix', s.postfix || '', 'class="code" rows="3"'))}
       ${field('固定负面', textArea('negative-fixed', s.negative, 'class="code" rows="3"'))}
       ${s.params ? field('NovelAI 参数', `<p class="style-param-line">${esc(line(s.params))}</p>`, '这个画风记住的模型、步数、CFG、采样器和噪声调度。选这个画风时自动换上；它在用的时候，在绘图里改这些参数会记到它身上。尺寸和种子是每张图自己的，不跟画风走。') : ''}
       <div class="actions">${btn('save-style', '保存画风', 'primary')}</div>`);
